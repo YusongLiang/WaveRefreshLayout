@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="WaveRefreshLayout">
+        <attr name="colorWaveLight" format="color" />
+        <attr name="colorWaveDark" format="color" />
+        <attr name="colorBackground" format="color" />
+        <attr name="peakHeight" format="dimension" />
+        <attr name="waveWidth" format="dimension" />
+    </declare-styleable>
+    <declare-styleable name="WaveRefreshLayout_Layout">
+        <attr name="childType" format="integer">
+            <enum name="normal" value="0" />
+            <enum name="header" value="1" />
+            <enum name="footer" value="2" />
+        </attr>
+    </declare-styleable>
+</resources>
