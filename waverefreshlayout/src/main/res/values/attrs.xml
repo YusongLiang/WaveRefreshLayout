@@ -4,8 +4,11 @@
         <attr name="colorWaveLight" format="color" />
         <attr name="colorWaveDark" format="color" />
         <attr name="colorBackground" format="color" />
+        <attr name="colorSun" format="color" />
         <attr name="peakHeight" format="dimension" />
         <attr name="waveWidth" format="dimension" />
+        <attr name="sunRadius" format="dimension" />
+        <attr name="sunshineLength" format="dimension" />
     </declare-styleable>
     <declare-styleable name="WaveRefreshLayout_Layout">
         <attr name="childType" format="integer">
