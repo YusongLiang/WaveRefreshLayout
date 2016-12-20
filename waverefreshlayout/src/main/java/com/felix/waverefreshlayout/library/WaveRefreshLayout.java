@@ -155,6 +155,11 @@ public class WaveRefreshLayout extends LinearLayout {
     private Path mSunshinePath;
 
     /**
+     * 太阳路径
+     */
+    private Path mSunPath;
+
+    /**
      * 阳光内部圆的半径
      */
     private int mRadiusOuter;
@@ -387,8 +392,8 @@ public class WaveRefreshLayout extends LinearLayout {
     private void drawSun(Canvas canvas) {
         canvas.save();
         canvas.translate(getWidth() / 2, mTopY + 108);
-        canvas.drawPath(mSunshinePath, mSunPaint);
-        canvas.drawCircle(0, 0, mRadiusInner, mSunPaint);//绘制太阳中心
+        updateSunPath();
+        canvas.drawPath(mSunPath, mSunPaint);
         canvas.restore();
     }
 
@@ -415,7 +420,7 @@ public class WaveRefreshLayout extends LinearLayout {
         mDarkWavePath.close();
     }
 
-    private Path updateLightWavePath() {
+    private void updateLightWavePath() {
         if (mLightWavePath == null) mLightWavePath = new Path();
         else mLightWavePath.reset();
         mLightWavePath.moveTo(0, mWaveBaselineY);
@@ -423,7 +428,13 @@ public class WaveRefreshLayout extends LinearLayout {
         mLightWavePath.moveTo(0, mWaveBaselineY);
         addWaveLineToPath(mLightWavePath, TYPE_DARK_WAVE);
         mLightWavePath.close();
-        return mLightWavePath;
+    }
+
+    private void updateSunPath() {
+        if (mSunPath == null) mSunPath = new Path();
+        else mSunPath.reset();
+        mSunPath.addPath(mSunshinePath);
+        mSunPath.addCircle(0, 0, mRadiusInner, Path.Direction.CW);
     }
 
     @Override
