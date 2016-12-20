@@ -564,8 +564,8 @@ public class WaveRefreshLayout extends LinearLayout {
                 break;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
-                mTopYFrom=mTopY;
-                mRestoreAnim.start();
+                mTopYFrom = mTopY;
+                if (mStateIndex > STATE_NORMAL) mRestoreAnim.start();
                 break;
         }
         updateState();
