@@ -3,6 +3,7 @@ package com.felix.waverefreshlayout.sample;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 
 import com.felix.waverefreshlayout.library.WaveRefreshLayout;
 
@@ -35,8 +36,9 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void run() {
                         waveRefreshLayout.finishRefresh();
+                        Log.d("test", "onRefresh");
                     }
-                }, 3000);
+                }, 2000);
             }
         });
     }

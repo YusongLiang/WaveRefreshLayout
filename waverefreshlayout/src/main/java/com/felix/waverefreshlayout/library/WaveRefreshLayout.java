@@ -29,34 +29,64 @@ import java.lang.annotation.RetentionPolicy;
  */
 public class WaveRefreshLayout extends LinearLayout {
 
+    /**
+     * 线条类型注解，所修饰的变量仅可取{@link #TYPE_BACKGROUND},{@link #TYPE_DARK_WAVE}和{@link #TYPE_LIGHT_WAVE}中的一种
+     */
     @IntDef({TYPE_BACKGROUND, TYPE_DARK_WAVE, TYPE_LIGHT_WAVE})
     @Retention(RetentionPolicy.SOURCE)
     public @interface LineType {
-
     }
 
+    /**
+     * 波浪背景边界线类型曲线
+     */
     private static final int TYPE_BACKGROUND = 0;
 
+    /**
+     * 深色波浪边界类型曲线
+     */
     private static final int TYPE_DARK_WAVE = 1;
 
+    /**
+     * 浅色波浪边界类型曲线
+     */
     private static final int TYPE_LIGHT_WAVE = 2;
 
+    /**
+     * 子控件类型注解，修饰变量可取{@link #TYPE_CHILD_NONE},{@link #TYPE_CHILD_HEADER}和{@link #TYPE_CHILD_FOOTER}之一
+     */
     @IntDef({TYPE_CHILD_NONE, TYPE_CHILD_HEADER, TYPE_CHILD_FOOTER})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface ChildType {
+    public @interface ChildType {}
 
-    }
-
+    /**
+     * 子控件类型无，为子控件默认类型
+     */
     public static final int TYPE_CHILD_NONE = 0;
 
+    /**
+     * 子控件类型头部，仅允许有一个
+     */
     public static final int TYPE_CHILD_HEADER = 1;
 
+    /**
+     * 子控件类型脚部，仅允许有一个
+     */
     public static final int TYPE_CHILD_FOOTER = 2;
 
+    /**
+     * 状态类型注解，所修饰变量可取
+     * {@link #STATE_WAVE_HIDE}，
+     * {@link #STATE_HEADER_HIDE}，
+     * {@link #STATE_NORMAL}，
+     * {@link #STATE_PULL_TO_REFRESH}，
+     * {@link #STATE_SHOW_SUN}，
+     * {@link #STATE_REFRESHABLE}之一
+     * 界面上滑时对应数值逐渐减小，下滑时则增大
+     */
     @IntDef({STATE_WAVE_HIDE, STATE_HEADER_HIDE, STATE_NORMAL, STATE_PULL_TO_REFRESH, STATE_SHOW_SUN, STATE_REFRESHABLE})
     @Retention(RetentionPolicy.SOURCE)
     public @interface State {
-
     }
 
     /**
@@ -231,10 +261,10 @@ public class WaveRefreshLayout extends LinearLayout {
     /**
      * 水平移动线程
      *
-     * @see #startHorizontalMoveThread()
-     * @see #stopHorizontalMoveThread()
+     * @see #startUpdateViewThread()
+     * @see #stopUpdateViewThread()
      */
-    private Thread mHorizontalMoveThread;
+    private Thread mUpdateThread;
 
     /**
      * 波浪水平偏移
@@ -292,12 +322,24 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     private OnRefreshListener mOnRefreshListener;
 
+    /**
+     * 云朵位图对象
+     */
     private Bitmap mCloudBitmap;
 
+    /**
+     * 云宽度
+     */
     private int mCloudWidth;
 
+    /**
+     * 云高度
+     */
     private int mCloudHeight;
 
+    /**
+     * 云位置横坐标
+     */
     private int mCloudX;
 
     public WaveRefreshLayout(Context context) {
@@ -312,11 +354,6 @@ public class WaveRefreshLayout extends LinearLayout {
         initSunshinePath();
         initCloudBitmap();
         initAnimator();
-    }
-
-    private void initCloudBitmap() {
-        Bitmap temp = BitmapFactory.decodeResource(getResources(), R.drawable.ic_cloud);
-        mCloudBitmap = Bitmap.createScaledBitmap(temp, mCloudWidth, mCloudHeight, true);
     }
 
     private void initFromAttributes(Context context, AttributeSet attrs) {
@@ -336,6 +373,9 @@ public class WaveRefreshLayout extends LinearLayout {
         a.recycle();
     }
 
+    /**
+     * 初始化画笔
+     */
     private void initPaints() {
         mWavePaintLight = new Paint(Paint.ANTI_ALIAS_FLAG);
         mWavePaintLight.setColor(mWaveColorLight);
@@ -353,6 +393,9 @@ public class WaveRefreshLayout extends LinearLayout {
         mCloudPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     }
 
+    /**
+     * 初始化布局设置
+     */
     private void initSettings() {
         setClickable(true);
         setOrientation(VERTICAL);
@@ -378,6 +421,17 @@ public class WaveRefreshLayout extends LinearLayout {
         mSunshinePath.addCircle(0, 0, mRadiusOuter - 3, Path.Direction.CCW);
     }
 
+    /**
+     * 初始化云朵位图
+     */
+    private void initCloudBitmap() {
+        Bitmap temp = BitmapFactory.decodeResource(getResources(), R.drawable.ic_cloud);
+        mCloudBitmap = Bitmap.createScaledBitmap(temp, mCloudWidth, mCloudHeight, true);
+    }
+
+    /**
+     * 初始化动画
+     */
     private void initAnimator() {
         mRestoreAnim = ValueAnimator.ofFloat(1, 0);
         mRestoreAnim.setDuration(100);
@@ -412,7 +466,7 @@ public class WaveRefreshLayout extends LinearLayout {
         @Override
         public void onAnimationEnd(Animator animation) {
             if (mWillDoRefresh) {
-                if (mOnRefreshListener != null) {
+                if (mOnRefreshListener != null && !mIsRefreshing) {
                     mIsRefreshing = true;
                     mOnRefreshListener.onRefresh();
                 }
@@ -462,26 +516,26 @@ public class WaveRefreshLayout extends LinearLayout {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        startHorizontalMoveThread();
+        startUpdateViewThread();
         updateDrawParams();
     }
 
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        stopHorizontalMoveThread();
+        stopUpdateViewThread();
     }
 
-    private void stopHorizontalMoveThread() {
-        if (mHorizontalMoveThread != null) {
-            mHorizontalMoveThread.interrupt();
-            mHorizontalMoveThread = null;
+    private void stopUpdateViewThread() {
+        if (mUpdateThread != null) {
+            mUpdateThread.interrupt();
+            mUpdateThread = null;
         }
     }
 
-    private void startHorizontalMoveThread() {
-        if (mHorizontalMoveThread == null) {
-            mHorizontalMoveThread = new Thread() {
+    private void startUpdateViewThread() {
+        if (mUpdateThread == null) {
+            mUpdateThread = new Thread() {
                 @Override
                 public void run() {
                     while (true) {
@@ -504,7 +558,7 @@ public class WaveRefreshLayout extends LinearLayout {
                     }
                 }
             };
-            mHorizontalMoveThread.start();
+            mUpdateThread.start();
         }
     }
 
@@ -729,9 +783,9 @@ public class WaveRefreshLayout extends LinearLayout {
                 break;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
-                mTopYRestoreFrom = mTopY;
                 if (mStateIndex > STATE_NORMAL) {
-                    mWillDoRefresh = mIsRefreshable && mStateIndex >= STATE_REFRESHABLE;
+                    mTopYRestoreFrom = mTopY;
+                    mWillDoRefresh = mIsRefreshable && mStateIndex == STATE_REFRESHABLE;
                     mRestoreAnim.start();
                 }
                 break;
@@ -768,6 +822,11 @@ public class WaveRefreshLayout extends LinearLayout {
             mStateIndex = STATE_WAVE_HIDE;
         } else {
             mStateIndex = STATE_HEADER_HIDE;
+        }
+        if (mIsRefreshing) {
+            if (mStateIndex != STATE_REFRESHABLE) {//刷新过程中被滑回
+                finishRefresh();
+            }
         }
     }
 
@@ -877,8 +936,17 @@ public class WaveRefreshLayout extends LinearLayout {
         mOnRefreshListener = onRefreshListener;
     }
 
+    /**
+     * 界面刷新监听器
+     *
+     * @see #setOnRefreshListener(OnRefreshListener)
+     * @see #finishRefresh()
+     */
     public interface OnRefreshListener {
 
+        /**
+         * 刷新数据时执行的操作，当刷新完成后可调用{@link #finishRefresh()}完成刷新，并将水波恢复成初始状态
+         */
         void onRefresh();
     }
 
