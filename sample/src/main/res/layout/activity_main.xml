@@ -36,15 +36,15 @@
                 android:textSize="18sp" />
         </RelativeLayout>
 
-            <TextView
-                android:background="@android:color/white"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingLeft="24dp"
-                android:paddingRight="24dp"
-                android:paddingTop="16dp"
-                android:text="@string/large_text_sample"
-                android:textSize="16sp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@android:color/white"
+            android:paddingLeft="24dp"
+            android:paddingRight="24dp"
+            android:paddingTop="16dp"
+            android:text="@string/large_text_sample"
+            android:textSize="16sp" />
     </com.felix.waverefreshlayout.library.WaveRefreshLayout>
 
 </RelativeLayout>
