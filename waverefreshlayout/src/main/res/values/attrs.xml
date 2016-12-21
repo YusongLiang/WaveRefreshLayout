@@ -9,6 +9,9 @@
         <attr name="waveWidth" format="dimension" />
         <attr name="sunRadius" format="dimension" />
         <attr name="sunshineLength" format="dimension" />
+        <attr name="refreshable" format="boolean" />
+        <attr name="cloudWidth" format="dimension" />
+        <attr name="cloudHeight" format="dimension" />
     </declare-styleable>
     <declare-styleable name="WaveRefreshLayout_Layout">
         <attr name="childType" format="integer">

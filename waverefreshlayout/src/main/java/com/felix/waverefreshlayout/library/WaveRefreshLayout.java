@@ -4,6 +4,8 @@ import android.animation.Animator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.res.TypedArray;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -29,7 +31,9 @@ public class WaveRefreshLayout extends LinearLayout {
 
     @IntDef({TYPE_BACKGROUND, TYPE_DARK_WAVE, TYPE_LIGHT_WAVE})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface LineType {}
+    public @interface LineType {
+
+    }
 
     private static final int TYPE_BACKGROUND = 0;
 
@@ -39,7 +43,9 @@ public class WaveRefreshLayout extends LinearLayout {
 
     @IntDef({TYPE_CHILD_NONE, TYPE_CHILD_HEADER, TYPE_CHILD_FOOTER})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface ChildType {}
+    public @interface ChildType {
+
+    }
 
     public static final int TYPE_CHILD_NONE = 0;
 
@@ -49,7 +55,9 @@ public class WaveRefreshLayout extends LinearLayout {
 
     @IntDef({STATE_WAVE_HIDE, STATE_HEADER_HIDE, STATE_NORMAL, STATE_PULL_TO_REFRESH, STATE_SHOW_SUN, STATE_REFRESHABLE})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface State {}
+    public @interface State {
+
+    }
 
     /**
      * 上滑到头部完全隐藏状态
@@ -142,6 +150,11 @@ public class WaveRefreshLayout extends LinearLayout {
     private Paint mSunPaint;
 
     /**
+     * 云画笔
+     */
+    private Paint mCloudPaint;
+
+    /**
      * 浅色波浪路径
      */
     private Path mLightWavePath;
@@ -186,6 +199,9 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     private int mHeaderBottom = -1;
 
+    /**
+     * 波峰初始高度
+     */
     private int mInitialPeakHeight;
 
     /**
@@ -246,9 +262,43 @@ public class WaveRefreshLayout extends LinearLayout {
     @State
     private int mStateIndex;
 
+    /**
+     * 弹回动画
+     */
     private ValueAnimator mRestoreAnim;
 
-    private int mTopYFrom;
+    /**
+     * 开始弹回时的{@link #mTopY}值
+     */
+    private int mTopYRestoreFrom;
+
+    /**
+     * 是否要执行刷新操作
+     */
+    private boolean mWillDoRefresh;
+
+    /**
+     * 是否允许刷新功能
+     */
+    private boolean mIsRefreshable;
+
+    /**
+     * 是否正在刷新中
+     */
+    private boolean mIsRefreshing;
+
+    /**
+     * 刷新监听器
+     */
+    private OnRefreshListener mOnRefreshListener;
+
+    private Bitmap mCloudBitmap;
+
+    private int mCloudWidth;
+
+    private int mCloudHeight;
+
+    private int mCloudX;
 
     public WaveRefreshLayout(Context context) {
         this(context, null);
@@ -260,7 +310,13 @@ public class WaveRefreshLayout extends LinearLayout {
         initPaints();
         initSettings();
         initSunshinePath();
+        initCloudBitmap();
         initAnimator();
+    }
+
+    private void initCloudBitmap() {
+        Bitmap temp = BitmapFactory.decodeResource(getResources(), R.drawable.ic_cloud);
+        mCloudBitmap = Bitmap.createScaledBitmap(temp, mCloudWidth, mCloudHeight, true);
     }
 
     private void initFromAttributes(Context context, AttributeSet attrs) {
@@ -272,6 +328,9 @@ public class WaveRefreshLayout extends LinearLayout {
         mWaveWidth = a.getDimensionPixelSize(R.styleable.WaveRefreshLayout_waveWidth, 200);
         mSunColor = a.getColor(R.styleable.WaveRefreshLayout_colorSun, 0xFFFFC900);
         mSunshineLength = a.getDimensionPixelOffset(R.styleable.WaveRefreshLayout_sunshineLength, 16);
+        mIsRefreshable = a.getBoolean(R.styleable.WaveRefreshLayout_refreshable, true);
+        mCloudWidth = a.getDimensionPixelSize(R.styleable.WaveRefreshLayout_cloudWidth, 108);
+        mCloudHeight = a.getDimensionPixelOffset(R.styleable.WaveRefreshLayout_cloudHeight, 72);
         mRadiusOuter = a.getDimensionPixelOffset(R.styleable.WaveRefreshLayout_sunRadius, 36);
         mRadiusInner = mRadiusOuter - 9;
         a.recycle();
@@ -291,6 +350,7 @@ public class WaveRefreshLayout extends LinearLayout {
         mSunPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         mSunPaint.setColor(mSunColor);
         mSunPaint.setStyle(Paint.Style.FILL);
+        mCloudPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     }
 
     private void initSettings() {
@@ -320,6 +380,7 @@ public class WaveRefreshLayout extends LinearLayout {
 
     private void initAnimator() {
         mRestoreAnim = ValueAnimator.ofFloat(1, 0);
+        mRestoreAnim.setDuration(100);
         mRestoreAnim.setInterpolator(new DecelerateInterpolator());
         mRestoreAnim.addListener(mAnimListener);
         mRestoreAnim.addUpdateListener(mUpdateListener);
@@ -333,21 +394,33 @@ public class WaveRefreshLayout extends LinearLayout {
         }
     };
 
-    private void restoreView(float animatedValue) {
-        // TODO: 2016/12/20 刷新或弹回初始状态
-        mTopY = (int) (mTopYFrom * animatedValue);
-        updateView();
+    /**
+     * 恢复控件，弹回初始位置或弹回到刷新位置
+     *
+     * @param percentage 回弹百分比
+     */
+    private void restoreView(float percentage) {
+        if (mWillDoRefresh) //执行刷新，弹回到刷新高度
+            mTopY = (int) ((mTopYRestoreFrom + MIN_REFRESH_HEIGHT) * percentage) - MIN_REFRESH_HEIGHT;
+        else //不执行刷新，直接弹回初始位置
+            mTopY = (int) (mTopYRestoreFrom * percentage);
+        updateState();
+        updateDrawParams();
     }
 
     private Animator.AnimatorListener mAnimListener = new Animator.AnimatorListener() {
         @Override
-        public void onAnimationStart(Animator animation) {
-
+        public void onAnimationEnd(Animator animation) {
+            if (mWillDoRefresh) {
+                if (mOnRefreshListener != null) {
+                    mIsRefreshing = true;
+                    mOnRefreshListener.onRefresh();
+                }
+            }
         }
 
         @Override
-        public void onAnimationEnd(Animator animation) {
-            // TODO: 2016/12/20 刷新结束开始回弹动画
+        public void onAnimationStart(Animator animation) {
         }
 
         @Override
@@ -358,6 +431,22 @@ public class WaveRefreshLayout extends LinearLayout {
         public void onAnimationRepeat(Animator animation) {
         }
     };
+
+    /**
+     * 完成刷新
+     * 在{@link OnRefreshListener#onRefresh()} 内设置刷新时执行的操作，刷新结束时调用该方法
+     * 需要{@link #setIsRefreshable(boolean)}置为true
+     */
+    public void finishRefresh() {
+        if (mIsRefreshable && mIsRefreshing) {
+            mCloudX = 0;
+            mTopYRestoreFrom = -MIN_REFRESH_HEIGHT;
+            mWillDoRefresh = false;
+            mIsRefreshing = false;
+            if (mStateIndex == STATE_REFRESHABLE)
+                mRestoreAnim.start();
+        }
+    }
 
     @Override
     public boolean shouldDelayChildPressedState() {
@@ -374,7 +463,7 @@ public class WaveRefreshLayout extends LinearLayout {
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         startHorizontalMoveThread();
-        updateView();
+        updateDrawParams();
     }
 
     @Override
@@ -400,6 +489,12 @@ public class WaveRefreshLayout extends LinearLayout {
                             if (mStateIndex > STATE_WAVE_HIDE) {
                                 mHorizontalOffset--;
                                 mHorizontalOffset %= (mWaveWidth * 2);
+                                if (mIsRefreshing) {
+                                    mSunRotateDegree += 5;
+                                    mCloudX += 3;
+                                    final int distance = getWidth() + mCloudWidth;
+                                    mCloudX %= distance;
+                                }
                                 postInvalidate();
                                 Thread.sleep(16);
                             }
@@ -413,6 +508,11 @@ public class WaveRefreshLayout extends LinearLayout {
         }
     }
 
+    /**
+     * 获取头部底坐标
+     *
+     * @return 底部纵坐标
+     */
     private int getHeaderBottom() {
         final int count = getChildCount();
         if (count <= 0) return 0;
@@ -427,6 +527,12 @@ public class WaveRefreshLayout extends LinearLayout {
         }
     }
 
+    /**
+     * 通过类型找到子控件
+     *
+     * @param target 类型值
+     * @return 找到的第一个该类型子控件
+     */
     private View findChildByType(@ChildType int target) {
         final int count = getChildCount();
         for (int i = 0; i < count; i++) {
@@ -443,11 +549,133 @@ public class WaveRefreshLayout extends LinearLayout {
     protected void onDraw(Canvas canvas) {
         if (mHeaderBottom == -1) mHeaderBottom = getHeaderBottom();
         if (mStateIndex > STATE_WAVE_HIDE) drawBackground(canvas);
+        if (mIsRefreshing)
+            drawCloud(mCloudX, mTopY + SUN_CENTER_OFFSET - 56, 200, false, canvas);
         if (mStateIndex >= STATE_SHOW_SUN) drawSun(canvas);
+        if (mIsRefreshing)
+            drawCloud(mCloudX, mTopY + SUN_CENTER_OFFSET - 16, 255, true, canvas);
         if (mStateIndex > STATE_HEADER_HIDE) drawDarkWave(canvas);
         if (mStateIndex > STATE_WAVE_HIDE) drawLightWave(canvas);
     }
 
+    /**
+     * 绘制背景
+     *
+     * @param canvas 画布
+     */
+    private void drawBackground(Canvas canvas) {
+        canvas.save();
+        canvas.translate(mHorizontalOffset, 0);
+        updateBackgroundPath();
+        canvas.drawPath(mBackgroundPath, mBackgroundPaint);
+        canvas.restore();
+    }
+
+    /**
+     * 绘制浅色波浪
+     *
+     * @param canvas 画布
+     */
+    private void drawLightWave(Canvas canvas) {
+        canvas.save();
+        canvas.translate(mHorizontalOffset, 0);
+        updateLightWavePath();
+        canvas.drawPath(mLightWavePath, mWavePaintLight);
+        canvas.restore();
+    }
+
+    /**
+     * 绘制深色波浪
+     *
+     * @param canvas 画布
+     */
+    private void drawDarkWave(Canvas canvas) {
+        canvas.save();
+        updateDarkWavePath();
+        canvas.translate(mHorizontalOffset, 0);
+        canvas.drawPath(mDarkWavePath, mWavePaintDark);
+        canvas.restore();
+    }
+
+    /**
+     * 绘制太阳
+     *
+     * @param canvas 画布
+     */
+    private void drawSun(Canvas canvas) {
+        canvas.save();
+        canvas.translate(getWidth() / 2, mTopY + SUN_CENTER_OFFSET);
+        canvas.rotate(mSunRotateDegree, 0, 0);
+        updateSunPath();
+        canvas.drawPath(mSunPath, mSunPaint);
+        canvas.restore();
+    }
+
+    /**
+     * 绘制云朵
+     *
+     * @param x      云朵横坐标
+     * @param y      云朵纵坐标
+     * @param alpha  云朵透明度
+     * @param isRtl  是否为从右至左
+     * @param canvas 画布
+     */
+    private void drawCloud(int x, int y, int alpha, boolean isRtl, Canvas canvas) {
+        mCloudPaint.setAlpha(alpha);
+        canvas.save();
+        if (isRtl) canvas.scale(-1, 1, getWidth() / 2, 0);
+        canvas.drawBitmap(mCloudBitmap, x, y, mCloudPaint);
+        canvas.restore();
+    }
+
+    /**
+     * 更新背景路径
+     */
+    private void updateBackgroundPath() {
+        if (mBackgroundPath == null)
+            mBackgroundPath = new Path();
+        else mBackgroundPath.reset();
+        mBackgroundPath.moveTo(0, mTopY);
+        mBackgroundPath.rLineTo(0, WAVE_BASELINE_OFFSET - mTopY);
+        addWaveLineToPath(mBackgroundPath, TYPE_BACKGROUND);
+        mBackgroundPath.rLineTo(0, mTopY - WAVE_BASELINE_OFFSET);
+        mBackgroundPath.lineTo(0, mTopY);
+        mBackgroundPath.close();
+    }
+
+    /**
+     * 更新深色波浪路径
+     */
+    private void updateDarkWavePath() {
+        if (mDarkWavePath == null) mDarkWavePath = new Path();
+        else mDarkWavePath.reset();
+        mDarkWavePath.moveTo(0, mHeaderBottom);
+        mDarkWavePath.lineTo(0, WAVE_BASELINE_OFFSET);
+        addWaveLineToPath(mDarkWavePath, TYPE_DARK_WAVE);
+        mDarkWavePath.rLineTo(0, mHeaderBottom - WAVE_BASELINE_OFFSET);
+        mDarkWavePath.lineTo(0, mHeaderBottom);
+        mDarkWavePath.close();
+    }
+
+    /**
+     * 更新浅色波浪路径
+     */
+    private void updateLightWavePath() {
+        if (mLightWavePath == null) mLightWavePath = new Path();
+        else mLightWavePath.reset();
+        mLightWavePath.moveTo(0, WAVE_BASELINE_OFFSET);
+        addWaveLineToPath(mLightWavePath, TYPE_LIGHT_WAVE);
+        mLightWavePath.moveTo(0, WAVE_BASELINE_OFFSET);
+        addWaveLineToPath(mLightWavePath, TYPE_DARK_WAVE);
+        mLightWavePath.close();
+    }
+
+    /**
+     * 在制定路径上添加波浪线
+     *
+     * @param src  需要添加波浪线的路径
+     * @param type 波浪线类型
+     */
     private void addWaveLineToPath(Path src, @LineType int type) {
         final int width = getWidth() + 2 * mWaveWidth;
         for (int i = 0, j = 0; i < width; i += mWaveWidth, j++) {
@@ -469,72 +697,9 @@ public class WaveRefreshLayout extends LinearLayout {
         }
     }
 
-    private void drawBackground(Canvas canvas) {
-        canvas.save();
-        canvas.translate(mHorizontalOffset, 0);
-        updateBackgroundPath();
-        canvas.drawPath(mBackgroundPath, mBackgroundPaint);
-        canvas.restore();
-    }
-
-    private void drawLightWave(Canvas canvas) {
-        canvas.save();
-        canvas.translate(mHorizontalOffset, 0);
-        updateLightWavePath();
-        canvas.drawPath(mLightWavePath, mWavePaintLight);
-        canvas.restore();
-    }
-
-    private void drawDarkWave(Canvas canvas) {
-        canvas.save();
-        updateDarkWavePath();
-        canvas.translate(mHorizontalOffset, 0);
-        canvas.drawPath(mDarkWavePath, mWavePaintDark);
-        canvas.restore();
-    }
-
-    private void drawSun(Canvas canvas) {
-        canvas.save();
-        canvas.translate(getWidth() / 2, mTopY + SUN_CENTER_OFFSET);
-        canvas.rotate(mSunRotateDegree, 0, 0);
-        updateSunPath();
-        canvas.drawPath(mSunPath, mSunPaint);
-        canvas.restore();
-    }
-
-    private void updateBackgroundPath() {
-        if (mBackgroundPath == null)
-            mBackgroundPath = new Path();
-        else mBackgroundPath.reset();
-        mBackgroundPath.moveTo(0, mTopY);
-        mBackgroundPath.rLineTo(0, WAVE_BASELINE_OFFSET - mTopY);
-        addWaveLineToPath(mBackgroundPath, TYPE_BACKGROUND);
-        mBackgroundPath.rLineTo(0, mTopY - WAVE_BASELINE_OFFSET);
-        mBackgroundPath.lineTo(0, mTopY);
-        mBackgroundPath.close();
-    }
-
-    private void updateDarkWavePath() {
-        if (mDarkWavePath == null) mDarkWavePath = new Path();
-        else mDarkWavePath.reset();
-        mDarkWavePath.moveTo(0, mHeaderBottom);
-        mDarkWavePath.lineTo(0, WAVE_BASELINE_OFFSET);
-        addWaveLineToPath(mDarkWavePath, TYPE_DARK_WAVE);
-        mDarkWavePath.rLineTo(0, mHeaderBottom - WAVE_BASELINE_OFFSET);
-        mDarkWavePath.lineTo(0, mHeaderBottom);
-        mDarkWavePath.close();
-    }
-
-    private void updateLightWavePath() {
-        if (mLightWavePath == null) mLightWavePath = new Path();
-        else mLightWavePath.reset();
-        mLightWavePath.moveTo(0, WAVE_BASELINE_OFFSET);
-        addWaveLineToPath(mLightWavePath, TYPE_LIGHT_WAVE);
-        mLightWavePath.moveTo(0, WAVE_BASELINE_OFFSET);
-        addWaveLineToPath(mLightWavePath, TYPE_DARK_WAVE);
-        mLightWavePath.close();
-    }
-
+    /**
+     * 更新太阳路径
+     */
     private void updateSunPath() {
         if (mSunPath == null) mSunPath = new Path();
         else mSunPath.reset();
@@ -559,20 +724,26 @@ public class WaveRefreshLayout extends LinearLayout {
                     dY /= (-mTopY / 160 + 1);
                 }
                 mTopY -= dY;
-                updateView();
+                updateDrawParams();
                 mLastY = currentY;
                 break;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
-                mTopYFrom = mTopY;
-                if (mStateIndex > STATE_NORMAL) mRestoreAnim.start();
+                mTopYRestoreFrom = mTopY;
+                if (mStateIndex > STATE_NORMAL) {
+                    mWillDoRefresh = mIsRefreshable && mStateIndex >= STATE_REFRESHABLE;
+                    mRestoreAnim.start();
+                }
                 break;
         }
         updateState();
         return super.onTouchEvent(event);
     }
 
-    private void updateView(){
+    /**
+     * 更新绘制参数，在{@link #mTopY} 发生变化后调用
+     */
+    private void updateDrawParams() {
         mPeakHeight = mInitialPeakHeight - mTopY / 16f;
         rotateSunTo(mTopY / 3f);
         scrollTo(0, mTopY);
@@ -585,7 +756,7 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     private void updateState() {
         final int showSunY = (int) (WAVE_BASELINE_OFFSET + mPeakHeight + mRadiusOuter + mSunshineLength - SUN_CENTER_OFFSET);
-        if (mTopY < -MIN_REFRESH_HEIGHT) {
+        if (mTopY <= -MIN_REFRESH_HEIGHT) {
             mStateIndex = STATE_REFRESHABLE;
         } else if (mTopY < showSunY) {
             mStateIndex = STATE_SHOW_SUN;
@@ -607,7 +778,7 @@ public class WaveRefreshLayout extends LinearLayout {
     }
 
     /**
-     * 旋转太阳指定角度
+     * 将太阳旋转指定角度
      *
      * @param degree 旋转的角度值
      */
@@ -615,16 +786,31 @@ public class WaveRefreshLayout extends LinearLayout {
         mSunRotateDegree += degree;
     }
 
+    /**
+     * 将太阳旋转到制定角度
+     *
+     * @param degree 目标角度
+     */
     private void rotateSunTo(float degree) {
         mSunRotateDegree = degree;
     }
 
-    public float getPeakHeight() {
-        return mPeakHeight;
+    /**
+     * 获取波峰初始高度
+     *
+     * @return 波峰初始高度
+     */
+    public float getInitialPeakHeight() {
+        return mInitialPeakHeight;
     }
 
-    public void setPeakHeight(int height) {
-        mPeakHeight = height;
+    /**
+     * 设置波峰初始高度
+     *
+     * @param height 波峰初始高度
+     */
+    public void setInitialPeakHeight(int height) {
+        mInitialPeakHeight = height;
     }
 
     /**
@@ -663,6 +849,39 @@ public class WaveRefreshLayout extends LinearLayout {
         mWaveColorLight = color;
     }
 
+    /**
+     * 是否支持刷新
+     *
+     * @return true表示支持刷新，false则相反
+     */
+    public boolean isRefreshable() {
+        return mIsRefreshable;
+    }
+
+    /**
+     * 设置是否支持刷新
+     *
+     * @param isRefreshable true表示支持刷新，false则相反
+     */
+    public void setIsRefreshable(boolean isRefreshable) {
+        mIsRefreshable = isRefreshable;
+    }
+
+    /**
+     * 设置刷新监听器
+     *
+     * @param onRefreshListener 刷新监听器
+     * @see OnRefreshListener
+     */
+    public void setOnRefreshListener(OnRefreshListener onRefreshListener) {
+        mOnRefreshListener = onRefreshListener;
+    }
+
+    public interface OnRefreshListener {
+
+        void onRefresh();
+    }
+
     @Override
     protected LayoutParams generateLayoutParams(ViewGroup.LayoutParams lp) {
         return new LayoutParams(lp);
@@ -680,6 +899,9 @@ public class WaveRefreshLayout extends LinearLayout {
 
     public static class LayoutParams extends LinearLayout.LayoutParams {
 
+        /**
+         * 子控件类型，可取{@link #TYPE_CHILD_HEADER},{@link #TYPE_CHILD_FOOTER}及{@link #TYPE_CHILD_NONE}中的一个
+         */
         public int childType;
 
         public LayoutParams(Context c, AttributeSet attrs) {
