@@ -11,11 +11,14 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PointF;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Message;
 import android.support.annotation.ColorInt;
 import android.support.annotation.IntDef;
 import android.support.annotation.RequiresApi;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
@@ -23,6 +26,7 @@ import android.widget.LinearLayout;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.ref.WeakReference;
 
 /**
  * @author Felix
@@ -30,11 +34,17 @@ import java.lang.annotation.RetentionPolicy;
 public class WaveRefreshLayout extends LinearLayout {
 
     /**
+     * 加载刷新数据完成
+     */
+    private static final int MESSAGE_LOAD_DATA_FINISH = 1;
+
+    /**
      * 线条类型注解，所修饰的变量仅可取{@link #TYPE_BACKGROUND},{@link #TYPE_DARK_WAVE}和{@link #TYPE_LIGHT_WAVE}中的一种
      */
     @IntDef({TYPE_BACKGROUND, TYPE_DARK_WAVE, TYPE_LIGHT_WAVE})
     @Retention(RetentionPolicy.SOURCE)
     public @interface LineType {
+
     }
 
     /**
@@ -57,7 +67,9 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     @IntDef({TYPE_CHILD_NONE, TYPE_CHILD_HEADER, TYPE_CHILD_FOOTER})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface ChildType {}
+    public @interface ChildType {
+
+    }
 
     /**
      * 子控件类型无，为子控件默认类型
@@ -87,6 +99,7 @@ public class WaveRefreshLayout extends LinearLayout {
     @IntDef({STATE_WAVE_HIDE, STATE_HEADER_HIDE, STATE_NORMAL, STATE_PULL_TO_REFRESH, STATE_SHOW_SUN, STATE_REFRESHABLE})
     @Retention(RetentionPolicy.SOURCE)
     public @interface State {
+
     }
 
     /**
@@ -342,6 +355,10 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     private int mCloudX;
 
+    private Handler mHandler = new LayoutHandler(this);
+
+    private VelocityTracker mVelocityTracker;
+
     public WaveRefreshLayout(Context context) {
         this(context, null);
     }
@@ -398,6 +415,8 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     private void initSettings() {
         setClickable(true);
+        setFocusable(true);
+        setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         setOrientation(VERTICAL);
         setWillNotDraw(false);
         mStateIndex = STATE_NORMAL;
@@ -492,13 +511,25 @@ public class WaveRefreshLayout extends LinearLayout {
      * 需要{@link #setIsRefreshable(boolean)}置为true
      */
     public void finishRefresh() {
+        finishRefresh(false);
+    }
+
+    /**
+     * 完成刷新
+     * 在{@link OnRefreshListener#onRefresh()} 内设置刷新时执行的操作，刷新结束时调用该方法
+     * 需要{@link #setIsRefreshable(boolean)}置为true
+     *
+     * @param isCancel 是否放弃刷新
+     */
+    private void finishRefresh(boolean isCancel) {
         if (mIsRefreshable && mIsRefreshing) {
             mCloudX = 0;
             mTopYRestoreFrom = -MIN_REFRESH_HEIGHT;
             mWillDoRefresh = false;
             mIsRefreshing = false;
-            if (mStateIndex == STATE_REFRESHABLE)
-                mRestoreAnim.start();
+            if (mStateIndex == STATE_REFRESHABLE && !isCancel) {
+                mHandler.sendEmptyMessageDelayed(MESSAGE_LOAD_DATA_FINISH, 0);
+            }
         }
     }
 
@@ -514,6 +545,11 @@ public class WaveRefreshLayout extends LinearLayout {
     }
 
     @Override
+    protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+        return super.drawChild(canvas, child, drawingTime);
+    }
+
+    @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         startUpdateViewThread();
@@ -526,6 +562,9 @@ public class WaveRefreshLayout extends LinearLayout {
         stopUpdateViewThread();
     }
 
+    /**
+     * 结束更新控件线程
+     */
     private void stopUpdateViewThread() {
         if (mUpdateThread != null) {
             mUpdateThread.interrupt();
@@ -533,6 +572,9 @@ public class WaveRefreshLayout extends LinearLayout {
         }
     }
 
+    /**
+     * 开始更新控件线程
+     */
     private void startUpdateViewThread() {
         if (mUpdateThread == null) {
             mUpdateThread = new Thread() {
@@ -601,6 +643,7 @@ public class WaveRefreshLayout extends LinearLayout {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        canvas.clipRect(0, mTopY - 100, getWidth(), mTopY + 2000);
         if (mHeaderBottom == -1) mHeaderBottom = getHeaderBottom();
         if (mStateIndex > STATE_WAVE_HIDE) drawBackground(canvas);
         if (mIsRefreshing)
@@ -763,6 +806,16 @@ public class WaveRefreshLayout extends LinearLayout {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        return onTouch(event);
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        return onTouch(ev);
+    }
+
+    private boolean onTouch(MotionEvent event) {
+        resetVelocityTracker();
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 mLastY = (int) event.getY();
@@ -772,8 +825,10 @@ public class WaveRefreshLayout extends LinearLayout {
                 int dY = currentY - mLastY;
                 if (Math.abs(dY) > 160) {//防止多点触控导致的跳跃
                     mLastY = currentY;
-                    return super.onTouchEvent(event);
+                    return true;
                 }
+                final int scrollY = getScrollY();
+                // TODO: 2016/12/22 用scrollY取代mTopY
                 if (mTopY < 0 && dY > 0) {
                     dY /= (-mTopY / 160 + 1);
                 }
@@ -791,7 +846,13 @@ public class WaveRefreshLayout extends LinearLayout {
                 break;
         }
         updateState();
-        return super.onTouchEvent(event);
+        return true;
+    }
+
+    private void resetVelocityTracker() {
+        if (mVelocityTracker == null)
+            mVelocityTracker = VelocityTracker.obtain();
+        else mVelocityTracker.clear();
     }
 
     /**
@@ -801,6 +862,7 @@ public class WaveRefreshLayout extends LinearLayout {
         mPeakHeight = mInitialPeakHeight - mTopY / 16f;
         rotateSunTo(mTopY / 3f);
         scrollTo(0, mTopY);
+
     }
 
     /**
@@ -825,7 +887,8 @@ public class WaveRefreshLayout extends LinearLayout {
         }
         if (mIsRefreshing) {
             if (mStateIndex != STATE_REFRESHABLE) {//刷新过程中被滑回
-                finishRefresh();
+                if (mOnRefreshListener != null) mOnRefreshListener.onCancel();
+                finishRefresh(true);
             }
         }
     }
@@ -940,14 +1003,16 @@ public class WaveRefreshLayout extends LinearLayout {
      * 界面刷新监听器
      *
      * @see #setOnRefreshListener(OnRefreshListener)
-     * @see #finishRefresh()
+     * @see #finishRefresh(boolean)
      */
     public interface OnRefreshListener {
 
         /**
-         * 刷新数据时执行的操作，当刷新完成后可调用{@link #finishRefresh()}完成刷新，并将水波恢复成初始状态
+         * 刷新数据时执行的操作，当刷新完成后可调用{@link #finishRefresh(boolean)}完成刷新，并将水波恢复成初始状态
          */
         void onRefresh();
+
+        void onCancel();
     }
 
     @Override
@@ -1013,6 +1078,25 @@ public class WaveRefreshLayout extends LinearLayout {
 
         public void setChildType(@ChildType int childType) {
             this.childType = childType;
+        }
+    }
+
+    private static class LayoutHandler extends Handler {
+
+        private WeakReference<WaveRefreshLayout> reference;
+
+        public LayoutHandler(WaveRefreshLayout view) {
+            reference = new WeakReference<>(view);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            WaveRefreshLayout v = reference.get();
+            switch (msg.what) {
+                case MESSAGE_LOAD_DATA_FINISH:
+                    v.mRestoreAnim.start();
+                    break;
+            }
         }
     }
 }

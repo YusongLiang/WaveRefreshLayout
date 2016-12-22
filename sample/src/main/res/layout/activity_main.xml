@@ -36,15 +36,41 @@
                 android:textSize="18sp" />
         </RelativeLayout>
 
-        <TextView
+        <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@android:color/white"
+                android:paddingBottom="24dp"
+                android:paddingLeft="24dp"
+                android:paddingRight="24dp"
+                android:paddingTop="16dp"
+                android:text="@string/large_text_sample"
+                android:textSize="16sp" />
+        </ScrollView>
+
+        <ListView
             android:background="@android:color/white"
-            android:paddingLeft="24dp"
-            android:paddingRight="24dp"
-            android:paddingTop="16dp"
-            android:text="@string/large_text_sample"
-            android:textSize="16sp" />
+            android:id="@+id/lv_test"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="80dp"
+            app:childType="footer">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerInParent="true"
+                android:text="@string/app_name"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+        </RelativeLayout>
     </com.felix.waverefreshlayout.library.WaveRefreshLayout>
 
 </RelativeLayout>
