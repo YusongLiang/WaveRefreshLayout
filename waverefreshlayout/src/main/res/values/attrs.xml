@@ -12,6 +12,7 @@
         <attr name="refreshable" format="boolean" />
         <attr name="cloudWidth" format="dimension" />
         <attr name="cloudHeight" format="dimension" />
+        <attr name="restoreDuration" format="integer" />
     </declare-styleable>
     <declare-styleable name="WaveRefreshLayout_Layout">
         <attr name="childType" format="integer">

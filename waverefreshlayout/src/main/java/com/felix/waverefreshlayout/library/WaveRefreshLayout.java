@@ -10,9 +10,8 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PointF;
+import android.graphics.Rect;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Message;
 import android.support.annotation.ColorInt;
 import android.support.annotation.IntDef;
 import android.support.annotation.RequiresApi;
@@ -23,10 +22,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.LinearLayout;
+import android.widget.Scroller;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.lang.ref.WeakReference;
 
 /**
  * @author Felix
@@ -37,6 +36,11 @@ public class WaveRefreshLayout extends LinearLayout {
      * 加载刷新数据完成
      */
     private static final int MESSAGE_LOAD_DATA_FINISH = 1;
+
+    /**
+     * 最小波浪高度
+     */
+    private static final int MIN_WAVE_HEIGHT = 56;
 
     /**
      * 线条类型注解，所修饰的变量仅可取{@link #TYPE_BACKGROUND},{@link #TYPE_DARK_WAVE}和{@link #TYPE_LIGHT_WAVE}中的一种
@@ -287,12 +291,7 @@ public class WaveRefreshLayout extends LinearLayout {
     /**
      * 上一个触摸点的纵坐标
      */
-    private int mLastY;
-
-    /**
-     * 页面顶部纵坐标
-     */
-    private int mTopY;
+    private float mLastY;
 
     /**
      * 太阳旋转角度
@@ -311,14 +310,14 @@ public class WaveRefreshLayout extends LinearLayout {
     private ValueAnimator mRestoreAnim;
 
     /**
-     * 开始弹回时的{@link #mTopY}值
+     * 开始弹回时的ScrollY值
      */
-    private int mTopYRestoreFrom;
+    private int mScrollYRestoreFrom;
 
     /**
-     * 是否要执行刷新操作
+     * 结束后是否会进入刷新状态
      */
-    private boolean mWillDoRefresh;
+    private boolean mRefreshWhenFinish;
 
     /**
      * 是否允许刷新功能
@@ -326,7 +325,7 @@ public class WaveRefreshLayout extends LinearLayout {
     private boolean mIsRefreshable;
 
     /**
-     * 是否正在刷新中
+     * 是否正在刷新
      */
     private boolean mIsRefreshing;
 
@@ -355,9 +354,13 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     private int mCloudX;
 
-    private Handler mHandler = new LayoutHandler(this);
-
     private VelocityTracker mVelocityTracker;
+
+    private Scroller mScroller;
+
+    private int mScrollBottom = 20000;
+
+    private long mRestoreDuration;
 
     public WaveRefreshLayout(Context context) {
         this(context, null);
@@ -367,7 +370,7 @@ public class WaveRefreshLayout extends LinearLayout {
         super(context, attrs);
         initFromAttributes(context, attrs);
         initPaints();
-        initSettings();
+        initLayoutSettings();
         initSunshinePath();
         initCloudBitmap();
         initAnimator();
@@ -383,6 +386,7 @@ public class WaveRefreshLayout extends LinearLayout {
         mSunColor = a.getColor(R.styleable.WaveRefreshLayout_colorSun, 0xFFFFC900);
         mSunshineLength = a.getDimensionPixelOffset(R.styleable.WaveRefreshLayout_sunshineLength, 16);
         mIsRefreshable = a.getBoolean(R.styleable.WaveRefreshLayout_refreshable, true);
+        mRestoreDuration = a.getInt(R.styleable.WaveRefreshLayout_restoreDuration, 200);
         mCloudWidth = a.getDimensionPixelSize(R.styleable.WaveRefreshLayout_cloudWidth, 108);
         mCloudHeight = a.getDimensionPixelOffset(R.styleable.WaveRefreshLayout_cloudHeight, 72);
         mRadiusOuter = a.getDimensionPixelOffset(R.styleable.WaveRefreshLayout_sunRadius, 36);
@@ -413,13 +417,14 @@ public class WaveRefreshLayout extends LinearLayout {
     /**
      * 初始化布局设置
      */
-    private void initSettings() {
+    private void initLayoutSettings() {
         setClickable(true);
         setFocusable(true);
         setDescendantFocusability(FOCUS_AFTER_DESCENDANTS);
         setOrientation(VERTICAL);
         setWillNotDraw(false);
         mStateIndex = STATE_NORMAL;
+        mScroller = new Scroller(getContext());
     }
 
     /**
@@ -453,7 +458,7 @@ public class WaveRefreshLayout extends LinearLayout {
      */
     private void initAnimator() {
         mRestoreAnim = ValueAnimator.ofFloat(1, 0);
-        mRestoreAnim.setDuration(100);
+        mRestoreAnim.setDuration(mRestoreDuration);
         mRestoreAnim.setInterpolator(new DecelerateInterpolator());
         mRestoreAnim.addListener(mAnimListener);
         mRestoreAnim.addUpdateListener(mUpdateListener);
@@ -473,10 +478,12 @@ public class WaveRefreshLayout extends LinearLayout {
      * @param percentage 回弹百分比
      */
     private void restoreView(float percentage) {
-        if (mWillDoRefresh) //执行刷新，弹回到刷新高度
-            mTopY = (int) ((mTopYRestoreFrom + MIN_REFRESH_HEIGHT) * percentage) - MIN_REFRESH_HEIGHT;
+        int scrollY;
+        if (mRefreshWhenFinish) //执行刷新，弹回到刷新高度
+            scrollY = (int) ((mScrollYRestoreFrom + MIN_REFRESH_HEIGHT) * percentage) - MIN_REFRESH_HEIGHT;
         else //不执行刷新，直接弹回初始位置
-            mTopY = (int) (mTopYRestoreFrom * percentage);
+            scrollY = (int) (mScrollYRestoreFrom * percentage);
+        scrollTo(0, scrollY);
         updateState();
         updateDrawParams();
     }
@@ -484,10 +491,14 @@ public class WaveRefreshLayout extends LinearLayout {
     private Animator.AnimatorListener mAnimListener = new Animator.AnimatorListener() {
         @Override
         public void onAnimationEnd(Animator animation) {
-            if (mWillDoRefresh) {
-                if (mOnRefreshListener != null && !mIsRefreshing) {
+            if (mOnRefreshListener != null && mIsRefreshing) {
+                if (mRefreshWhenFinish) {
                     mIsRefreshing = true;
-                    mOnRefreshListener.onRefresh();
+                    mOnRefreshListener.onAcquireData();
+                } else {
+                    mOnRefreshListener.onLoadData();
+                    mRefreshWhenFinish = false;
+                    mIsRefreshing = false;
                 }
             }
         }
@@ -507,7 +518,7 @@ public class WaveRefreshLayout extends LinearLayout {
 
     /**
      * 完成刷新
-     * 在{@link OnRefreshListener#onRefresh()} 内设置刷新时执行的操作，刷新结束时调用该方法
+     * 在{@link OnRefreshListener#onAcquireData()} 内设置刷新时执行的操作，刷新结束时调用该方法
      * 需要{@link #setIsRefreshable(boolean)}置为true
      */
     public void finishRefresh() {
@@ -516,7 +527,7 @@ public class WaveRefreshLayout extends LinearLayout {
 
     /**
      * 完成刷新
-     * 在{@link OnRefreshListener#onRefresh()} 内设置刷新时执行的操作，刷新结束时调用该方法
+     * 在{@link OnRefreshListener#onAcquireData()} 内设置刷新时执行的操作，刷新结束时调用该方法
      * 需要{@link #setIsRefreshable(boolean)}置为true
      *
      * @param isCancel 是否放弃刷新
@@ -524,11 +535,10 @@ public class WaveRefreshLayout extends LinearLayout {
     private void finishRefresh(boolean isCancel) {
         if (mIsRefreshable && mIsRefreshing) {
             mCloudX = 0;
-            mTopYRestoreFrom = -MIN_REFRESH_HEIGHT;
-            mWillDoRefresh = false;
-            mIsRefreshing = false;
+            mRefreshWhenFinish = false;
+            mScrollYRestoreFrom = -MIN_REFRESH_HEIGHT;
             if (mStateIndex == STATE_REFRESHABLE && !isCancel) {
-                mHandler.sendEmptyMessageDelayed(MESSAGE_LOAD_DATA_FINISH, 0);
+                mRestoreAnim.start();
             }
         }
     }
@@ -545,21 +555,18 @@ public class WaveRefreshLayout extends LinearLayout {
     }
 
     @Override
-    protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
-        return super.drawChild(canvas, child, drawingTime);
-    }
-
-    @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         startUpdateViewThread();
         updateDrawParams();
+        Rect rect = new Rect();
+        getGlobalVisibleRect(rect);
     }
 
     @Override
-    protected void onDetachedFromWindow() {
-        super.onDetachedFromWindow();
-        stopUpdateViewThread();
+    protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+        canvas.translate(0, getHeaderBottom());
+        return super.drawChild(canvas, child, drawingTime);
     }
 
     /**
@@ -585,9 +592,9 @@ public class WaveRefreshLayout extends LinearLayout {
                             if (mStateIndex > STATE_WAVE_HIDE) {
                                 mHorizontalOffset--;
                                 mHorizontalOffset %= (mWaveWidth * 2);
-                                if (mIsRefreshing) {
+                                if (mIsRefreshable && mIsRefreshing) {
                                     mSunRotateDegree += 5;
-                                    mCloudX += 3;
+                                    mCloudX += 2;
                                     final int distance = getWidth() + mCloudWidth;
                                     mCloudX %= distance;
                                 }
@@ -616,7 +623,7 @@ public class WaveRefreshLayout extends LinearLayout {
         if (headerView == null) {
             final View child = getChildAt(0);
             LayoutParams lp = (LayoutParams) child.getLayoutParams();
-            return lp.bottomMargin + child.getBottom();
+            return WAVE_BASELINE_OFFSET + mInitialPeakHeight + MIN_WAVE_HEIGHT + lp.topMargin + child.getTop();
         } else {
             LayoutParams lp = (LayoutParams) headerView.getLayoutParams();
             return lp.bottomMargin + headerView.getBottom();
@@ -643,14 +650,14 @@ public class WaveRefreshLayout extends LinearLayout {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        canvas.clipRect(0, mTopY - 100, getWidth(), mTopY + 2000);
+        final int scrollY = getScrollY();
         if (mHeaderBottom == -1) mHeaderBottom = getHeaderBottom();
         if (mStateIndex > STATE_WAVE_HIDE) drawBackground(canvas);
-        if (mIsRefreshing)
-            drawCloud(mCloudX, mTopY + SUN_CENTER_OFFSET - 56, 200, false, canvas);
+        if (mIsRefreshing && mIsRefreshable)
+            drawCloud(mCloudX, scrollY + SUN_CENTER_OFFSET - 56, 200, false, canvas);
         if (mStateIndex >= STATE_SHOW_SUN) drawSun(canvas);
-        if (mIsRefreshing)
-            drawCloud(mCloudX, mTopY + SUN_CENTER_OFFSET - 16, 255, true, canvas);
+        if (mIsRefreshing && mIsRefreshable)
+            drawCloud(mCloudX, scrollY + SUN_CENTER_OFFSET - 16, 255, true, canvas);
         if (mStateIndex > STATE_HEADER_HIDE) drawDarkWave(canvas);
         if (mStateIndex > STATE_WAVE_HIDE) drawLightWave(canvas);
     }
@@ -700,8 +707,9 @@ public class WaveRefreshLayout extends LinearLayout {
      * @param canvas 画布
      */
     private void drawSun(Canvas canvas) {
+        final int scrollY = getScrollY();
         canvas.save();
-        canvas.translate(getWidth() / 2, mTopY + SUN_CENTER_OFFSET);
+        canvas.translate(getWidth() / 2, scrollY + SUN_CENTER_OFFSET);
         canvas.rotate(mSunRotateDegree, 0, 0);
         updateSunPath();
         canvas.drawPath(mSunPath, mSunPaint);
@@ -732,11 +740,12 @@ public class WaveRefreshLayout extends LinearLayout {
         if (mBackgroundPath == null)
             mBackgroundPath = new Path();
         else mBackgroundPath.reset();
-        mBackgroundPath.moveTo(0, mTopY);
-        mBackgroundPath.rLineTo(0, WAVE_BASELINE_OFFSET - mTopY);
+        final int scrollY = getScrollY();
+        mBackgroundPath.moveTo(0, scrollY);
+        mBackgroundPath.rLineTo(0, WAVE_BASELINE_OFFSET - scrollY);
         addWaveLineToPath(mBackgroundPath, TYPE_BACKGROUND);
-        mBackgroundPath.rLineTo(0, mTopY - WAVE_BASELINE_OFFSET);
-        mBackgroundPath.lineTo(0, mTopY);
+        mBackgroundPath.rLineTo(0, scrollY - WAVE_BASELINE_OFFSET);
+        mBackgroundPath.lineTo(0, scrollY);
         mBackgroundPath.close();
     }
 
@@ -815,33 +824,37 @@ public class WaveRefreshLayout extends LinearLayout {
     }
 
     private boolean onTouch(MotionEvent event) {
-        resetVelocityTracker();
+        initVelocityTracker(event);
+        final int scrollY = getScrollY();
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
+                if (!mScroller.isFinished()) mScroller.abortAnimation();
                 mLastY = (int) event.getY();
                 break;
             case MotionEvent.ACTION_MOVE:
-                final int currentY = (int) event.getY();
-                int dY = currentY - mLastY;
+                final float currentY = event.getY();
+                int dY = (int) (currentY - mLastY);
+                mLastY = currentY;
                 if (Math.abs(dY) > 160) {//防止多点触控导致的跳跃
-                    mLastY = currentY;
                     return true;
                 }
-                final int scrollY = getScrollY();
-                // TODO: 2016/12/22 用scrollY取代mTopY
-                if (mTopY < 0 && dY > 0) {
-                    dY /= (-mTopY / 160 + 1);
+                if (scrollY < 0 && dY > 0) {
+                    dY /= (-scrollY / 160f + 1);
                 }
-                mTopY -= dY;
+                scrollBy(0, -dY);
                 updateDrawParams();
-                mLastY = currentY;
                 break;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
                 if (mStateIndex > STATE_NORMAL) {
-                    mTopYRestoreFrom = mTopY;
-                    mWillDoRefresh = mIsRefreshable && mStateIndex == STATE_REFRESHABLE;
+                    mScrollYRestoreFrom = scrollY;
+                    mIsRefreshing = mStateIndex == STATE_REFRESHABLE && mIsRefreshable;
+                    mRefreshWhenFinish = mIsRefreshing;
                     mRestoreAnim.start();
+                } else {
+                    mVelocityTracker.computeCurrentVelocity(1000);
+                    int velocityY = (int) mVelocityTracker.getYVelocity();
+                    fling(-velocityY);
                 }
                 break;
         }
@@ -849,20 +862,67 @@ public class WaveRefreshLayout extends LinearLayout {
         return true;
     }
 
-    private void resetVelocityTracker() {
+    /**
+     * 初始化速度追踪器
+     *
+     * @param event {@link MotionEvent}对象
+     *              从{@link #onTouchEvent(MotionEvent)}或{@link #onInterceptTouchEvent(MotionEvent)}中获取
+     * @see #onTouch(MotionEvent)
+     * @see #onTouchEvent(MotionEvent)
+     * @see #onInterceptTouchEvent(MotionEvent)
+     * @see #releaseVelocityTracker()
+     */
+    private void initVelocityTracker(MotionEvent event) {
         if (mVelocityTracker == null)
             mVelocityTracker = VelocityTracker.obtain();
-        else mVelocityTracker.clear();
+        mVelocityTracker.addMovement(event);
     }
 
     /**
-     * 更新绘制参数，在{@link #mTopY} 发生变化后调用
+     * 释放速度追踪器
+     *
+     * @see #initVelocityTracker(MotionEvent)
+     */
+    private void releaseVelocityTracker() {
+        if (mVelocityTracker != null) {
+            mVelocityTracker.recycle();
+            mVelocityTracker = null;
+        }
+    }
+
+    /**
+     * 执行Y方向上的猛冲操作
+     *
+     * @param velocityY Y方向速度
+     */
+    private void fling(int velocityY) {
+        final int scrollX = getScrollX();
+        final int scrollY = getScrollY();
+        mScroller.fling(scrollX, scrollY, 0, velocityY, 0, 0, 0, mScrollBottom);
+        invalidate();
+    }
+
+    @Override
+    public void computeScroll() {
+        updateDrawParams();
+        updateState();
+        if (mScroller.computeScrollOffset()) {
+            final int scrollX = mScroller.getCurrX();
+            final int scrollY = mScroller.getCurrY();
+            scrollTo(scrollX, scrollY);
+            postInvalidate();
+        }
+    }
+
+    /**
+     * 更新绘制参数，在scrollY 发生变化后调用
+     *
+     * @see #getScrollY()
      */
     private void updateDrawParams() {
-        mPeakHeight = mInitialPeakHeight - mTopY / 16f;
-        rotateSunTo(mTopY / 3f);
-        scrollTo(0, mTopY);
-
+        final int scrollY = getScrollY();
+        mPeakHeight = mInitialPeakHeight - scrollY / 16f;
+        if (!mIsRefreshing) rotateSunTo(scrollY / 3f);
     }
 
     /**
@@ -871,27 +931,36 @@ public class WaveRefreshLayout extends LinearLayout {
      * @see #mStateIndex
      */
     private void updateState() {
+        final int scrollY = getScrollY();
         final int showSunY = (int) (WAVE_BASELINE_OFFSET + mPeakHeight + mRadiusOuter + mSunshineLength - SUN_CENTER_OFFSET);
-        if (mTopY <= -MIN_REFRESH_HEIGHT) {
+        if (scrollY <= -MIN_REFRESH_HEIGHT) {
             mStateIndex = STATE_REFRESHABLE;
-        } else if (mTopY < showSunY) {
+        } else if (scrollY < showSunY) {
             mStateIndex = STATE_SHOW_SUN;
-        } else if (mTopY < 0) {
+        } else if (scrollY < 0) {
             mStateIndex = STATE_PULL_TO_REFRESH;
-        } else if (mTopY < WAVE_BASELINE_OFFSET + mPeakHeight) {
+        } else if (scrollY < WAVE_BASELINE_OFFSET + mPeakHeight) {
             mStateIndex = STATE_NORMAL;
-        } else if (mTopY < mHeaderBottom) {
+        } else if (scrollY < mHeaderBottom) {
             mStateIndex = STATE_WAVE_HIDE;
         } else {
             mStateIndex = STATE_HEADER_HIDE;
         }
         if (mIsRefreshing) {
             if (mStateIndex != STATE_REFRESHABLE) {//刷新过程中被滑回
-                if (mOnRefreshListener != null) mOnRefreshListener.onCancel();
                 finishRefresh(true);
             }
         }
     }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        stopUpdateViewThread();
+        releaseVelocityTracker();
+    }
+
+    // 此处以下为setter和getter
 
     @Override
     public void setOrientation(int orientation) {
@@ -972,6 +1041,24 @@ public class WaveRefreshLayout extends LinearLayout {
     }
 
     /**
+     * 获取拖回弹回时间
+     *
+     * @return 回弹时间的毫秒数
+     */
+    public long getRestoreDuration() {
+        return mRestoreDuration;
+    }
+
+    /**
+     * 获取波浪弹回时间
+     *
+     * @param duration 毫秒数
+     */
+    public void setRestoreDuration(long duration) {
+        mRestoreDuration = duration;
+    }
+
+    /**
      * 是否支持刷新
      *
      * @return true表示支持刷新，false则相反
@@ -1008,11 +1095,17 @@ public class WaveRefreshLayout extends LinearLayout {
     public interface OnRefreshListener {
 
         /**
-         * 刷新数据时执行的操作，当刷新完成后可调用{@link #finishRefresh(boolean)}完成刷新，并将水波恢复成初始状态
+         * 获取刷新数据
+         * 当获取完成后可调用{@link #finishRefresh(boolean)}完成刷新数据获取，并将水波恢复成初始状态，
+         * 当需要在页面加载数据时
          */
-        void onRefresh();
+        void onAcquireData();
 
-        void onCancel();
+        /**
+         * 加载刷新数据
+         * 获取到数据并调用{@link #finishRefresh(boolean)}弹回波浪后，在该方法中执行加载数据的操作
+         */
+        void onLoadData();
     }
 
     @Override
@@ -1078,25 +1171,6 @@ public class WaveRefreshLayout extends LinearLayout {
 
         public void setChildType(@ChildType int childType) {
             this.childType = childType;
-        }
-    }
-
-    private static class LayoutHandler extends Handler {
-
-        private WeakReference<WaveRefreshLayout> reference;
-
-        public LayoutHandler(WaveRefreshLayout view) {
-            reference = new WeakReference<>(view);
-        }
-
-        @Override
-        public void handleMessage(Message msg) {
-            WaveRefreshLayout v = reference.get();
-            switch (msg.what) {
-                case MESSAGE_LOAD_DATA_FINISH:
-                    v.mRestoreAnim.start();
-                    break;
-            }
         }
     }
 }

@@ -1,76 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/activity_main"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
-    <com.felix.waverefreshlayout.library.WaveRefreshLayout
-        android:id="@+id/wave_refresh_layout"
+    <android.support.v7.widget.Toolbar
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/colorPrimary" />
+
+    <android.support.v7.widget.RecyclerView
+        android:id="@+id/rv_demo_list"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        app:waveWidth="120dp">
-
-        <RelativeLayout
-            android:layout_width="match_parent"
-            android:layout_height="160dp"
-            android:padding="16dp"
-            app:childType="header">
-
-            <ImageView
-                android:id="@+id/iv_photo"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_alignParentBottom="true"
-                android:contentDescription="@null"
-                android:src="@mipmap/ic_launcher" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_alignBottom="@+id/iv_photo"
-                android:layout_marginStart="16dp"
-                android:layout_toEndOf="@+id/iv_photo"
-                android:text="@string/app_name"
-                android:textColor="@android:color/white"
-                android:textSize="18sp" />
-        </RelativeLayout>
-
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="match_parent">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@android:color/white"
-                android:paddingBottom="24dp"
-                android:paddingLeft="24dp"
-                android:paddingRight="24dp"
-                android:paddingTop="16dp"
-                android:text="@string/large_text_sample"
-                android:textSize="16sp" />
-        </ScrollView>
-
-        <ListView
-            android:background="@android:color/white"
-            android:id="@+id/lv_test"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <RelativeLayout
-            android:layout_width="match_parent"
-            android:layout_height="80dp"
-            app:childType="footer">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_centerInParent="true"
-                android:text="@string/app_name"
-                android:textColor="@android:color/white"
-                android:textSize="16sp" />
-        </RelativeLayout>
-    </com.felix.waverefreshlayout.library.WaveRefreshLayout>
-
-</RelativeLayout>
+        android:background="@android:color/white" />
+</LinearLayout>

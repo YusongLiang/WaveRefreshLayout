@@ -15,6 +15,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".activity.ListViewDemoActivity" />
+
+        <activity android:name=".activity.RecyclerViewDemoActivity" />
+
+        <activity android:name=".activity.ScrollViewDemoActivity" />
+
+        <activity android:name=".activity.NestedScrollDemoActivity" />
     </application>
 
 </manifest>
